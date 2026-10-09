@@ -14,6 +14,10 @@ from fastapi.responses import FileResponse
 from dotenv import load_dotenv
 
 from app.modules.ordenes.router import router as router_ordenes
+from app.modules.historial.router import router as router_historial
+from app.modules.inventario.router import router as router_inventario
+from app.modules.alertas.router import router as router_alertas
+from app.modules.comparacion.router import router as router_comparacion
 
 # Cargar variables de entorno desde archivo .env si existe
 load_dotenv()
@@ -72,3 +76,7 @@ def servir_inicio():
 
 # Registrar routers
 app.include_router(router_ordenes)
+app.include_router(router_historial)
+app.include_router(router_inventario)
+app.include_router(router_alertas)
+app.include_router(router_comparacion)
