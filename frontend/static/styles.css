@@ -1,0 +1,13 @@
+body {
+    font-family: system-ui, -apple-system, sans-serif;
+    margin: 0;
+    padding: 20px;
+    background-color: #f7f9fa;
+    color: #333;
+}
+
+header {
+    margin-bottom: 24px;
+    padding-bottom: 12px;
+    border-bottom: 2px solid #0056b3;
+}

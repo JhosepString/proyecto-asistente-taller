@@ -1,4 +1,4 @@
-# Design Document
+﻿# Design Document
 
 ---
 
@@ -10,6 +10,46 @@ El sistema es una aplicación web de página única que digitaliza las Órdenes 
 
 ## Architecture
 
+### Diagrama C4 Nivel 1 — Contexto del sistema
+
+```mermaid
+flowchart TD
+    subgraph Personas["Personas"]
+        REC["Recepcionista
+(asesor de servicio)"]
+        TEC["Técnico mecánico"]
+        ENC["Encargado Compras
+/ Almacén"]
+        GER["Gerente"]
+    end
+
+    subgraph SJM["Sistema Jorge Motors
+(esta aplicación)"]
+        APP["Asistente de Gestión
+de Taller y Repuestos"]
+    end
+
+    subgraph Externos["Sistemas externos"]
+        MCP["Servidor MCP
+(semana 4 · solo lectura)"]
+        GEM["Gemini API
+(Google)"]
+    end
+
+    REC -- "Registra OT" --> APP
+    TEC -- "Consulta historial
+y stock" --> APP
+    ENC -- "Consulta alertas
+y compara inventario" --> APP
+    GER -- "Genera reportes
+por técnico" --> APP
+    APP -- "Lee inventario
+e historial" --> MCP
+    APP -- "Solicita asistencia
+con IA" --> GEM
+```
+
+### Diagrama C4 Nivel 2 — Contenedores
 ```mermaid
 flowchart TD
     subgraph Usuario["Usuario del Taller"]
@@ -206,6 +246,25 @@ asistente_taller/
 
 ---
 
+### Contratos de la API REST
+
+> Los contratos completos (modelos Pydantic, validaciones de rango) se finalizan durante la implementación. Esta tabla establece los verbos HTTP, rutas, parámetros mínimos y códigos de respuesta acordados, derivados directamente de requirements.md.
+
+| Módulo | Verbo | Ruta | Parámetros / Cuerpo | Código éxito | Códigos de error | Requisitos |
+|---|---|---|---|---|---|---|
+| OT | POST | /ordenes | Body JSON: 
+ombre, dni, placa, marca, modelo, nio, km, motivo, 	ecnico | 201 {id_ot, mensaje} | 422 campo inválido/faltante; 503 error interno | R1.1–R1.7 |
+| Historial | GET | /historial | Query: q=<placa\|dni> | 200 {ordenes: [...]} hasta 100 items | 422 formato inválido; 503 MCP no disponible | R2.1–R2.5 |
+| Historial (detalle) | GET | /historial/{id_ot} | Path: id_ot | 200 {id, fecha, motivo, tecnico, estado, observaciones} | 404 no encontrada; 503 MCP no disponible | R2.2 |
+| Inventario | GET | /inventario | Query: q=<nombre\|codigo> | 200 {resultados: [{nombre, codigo, cantidad, unidad}]} | 422 entrada vacía; 503 MCP no disponible | R3.1–R3.7 |
+| Alertas | GET | /alertas | — | 200 {alertas: [{nombre, codigo, cantidad, stock_minimo}]} o {alertas: [], mensaje} | 503 MCP no disponible | R4.1–R4.6 |
+| Comparación | POST | /comparacion | Body JSON: items: [{codigo, conteo_fisico}] (mín. 1 ítem) | 200 {resultados: [{nombre, codigo, sistema, conteo, diferencia, descuadre}]} | 422 sin ítems; 503 MCP no disponible | R5.1–R5.6 |
+| Reportes | GET | /reportes | Query: echa_inicio=YYYY-MM-DD, echa_fin=YYYY-MM-DD | 200 {reporte: [{tecnico, total, abierta, en_proceso, cerrada}]} | 422 rango inválido; 503 MCP no disponible | R6.1–R6.6 |
+| Reportes CSV | GET | /reportes/csv | Query: echa_inicio, echa_fin | 200 	ext/csv UTF-8, 5 columnas | 422 rango inválido; 503 MCP no disponible | R6.5 |
+| Asistente IA | POST | /asistente | Body JSON: {pregunta, rol} donde ol ∈ {Recepcionista, Técnico, Encargado_Compras, Gerente} | 200 {respuesta} o {asistencia: null, mensaje} (degradado) | 422 rol inválido | R9.1–R9.3 |
+
+> **PENDIENTE (equipo):** confirmar si se expone GET /ordenes/{id_ot} para recuperar una OT por ID (necesario para la Propiedad 2 de PBT, round-trip). No hay requisito funcional explícito para este endpoint; su ausencia no rompe la UI pero sí dificulta las pruebas automáticas.
+
 ### Punto de extensión para la Unidad 3
 
 Cuando en la Unidad 3 se integre el agente de IA, los dos puntos de conexión naturales ya están definidos en la arquitectura actual:
@@ -236,7 +295,73 @@ Las siguientes decisiones quedan pendientes para el diseño detallado de cada m�
 
 ## Data Models
 
-Los modelos de datos detallados (esquema de tablas SQLite, tipos de columna, restricciones) se definirán en el diseño detallado de cada módulo. Ver sección 'Decisiones no tomadas'.
+> Las columnas marcadas **PENDIENTE** requieren decisión del equipo antes de implementar data/seed.py.
+
+### Tabla: clientes
+
+| Columna | Tipo SQLite | Restricción | Notas |
+|---|---|---|---|
+| id | INTEGER | PK AUTOINCREMENT | Identificador interno |
+| 
+ombre | TEXT | NOT NULL | Máx. 100 caracteres (Requisito 1.3) |
+| dni | TEXT | NOT NULL, UNIQUE | Exactamente 8 dígitos numéricos simulados (Requisito 1.3, 8.2) |
+
+### Tabla: ehiculos
+
+| Columna | Tipo SQLite | Restricción | Notas |
+|---|---|---|---|
+| id | INTEGER | PK AUTOINCREMENT | |
+| placa | TEXT | NOT NULL, UNIQUE | Máx. 10 caracteres (Requisito 1.3) |
+| marca | TEXT | NOT NULL | Máx. 50 caracteres |
+| modelo | TEXT | NOT NULL | Máx. 50 caracteres |
+| nio | INTEGER | NOT NULL | Entre 1900 y año en curso (Requisito 1.3) |
+| id_cliente | INTEGER | FK → clientes.id | |
+
+### Tabla: ordenes_trabajo
+
+| Columna | Tipo SQLite | Restricción | Notas |
+|---|---|---|---|
+| id | INTEGER | PK AUTOINCREMENT | Identificador único de OT (Requisito 1.2) |
+| id_vehiculo | INTEGER | FK → vehiculos.id, NOT NULL | |
+| id_cliente | INTEGER | FK → clientes.id, NOT NULL | |
+| kilometraje | INTEGER | NOT NULL | Entre 0 y 999 999 (Requisito 1.3) |
+| motivo | TEXT | NOT NULL | Máx. 500 caracteres |
+| 	ecnico | TEXT | NOT NULL | Nombre del técnico asignado |
+| estado | TEXT | NOT NULL | Valores: bierta / en proceso / cerrada |
+| observaciones | TEXT | | Puede ser NULL |
+| echa_hora | TEXT | NOT NULL | ISO 8601, generado automáticamente al crear |
+
+### Tabla: epuestos
+
+| Columna | Tipo SQLite | Restricción | Notas |
+|---|---|---|---|
+| id | INTEGER | PK AUTOINCREMENT | |
+| codigo | TEXT | NOT NULL, UNIQUE | Máx. 20 caracteres (Requisito 3.1) |
+| 
+ombre | TEXT | NOT NULL | Máx. 100 caracteres |
+| unidad | TEXT | NOT NULL | Ej.: unidad, litro, par |
+| stock_minimo | INTEGER | NOT NULL | Umbral de alerta (Requisito 4) — rango: **PENDIENTE** |
+
+### Tabla: stock
+
+| Columna | Tipo SQLite | Restricción | Notas |
+|---|---|---|---|
+| id_repuesto | INTEGER | PK, FK → repuestos.id | |
+| cantidad | INTEGER | NOT NULL | Cantidad disponible actual |
+
+### Tabla: 	razabilidad_ia
+
+| Columna | Tipo SQLite | Restricción | Notas |
+|---|---|---|---|
+| id | TEXT | PK | UUID v4, generado por el sistema (Requisito 9.2) |
+| 	imestamp | TEXT | NOT NULL | ISO 8601 (Requisito 9.1) |
+| ol | TEXT | NOT NULL | Recepcionista / Técnico / Encargado_Compras / Gerente |
+| pregunta | TEXT | NOT NULL | Texto libre |
+| contexto_mcp | TEXT | NOT NULL | JSON serializado de los datos del MCP usados como contexto |
+| espuesta | TEXT | | Texto generado por Gemini; NULL si hubo error |
+| error | TEXT | | Mensaje de error de Gemini; NULL si fue exitoso (Requisito 9.3) |
+
+> **Nota sobre concurrencia:** ADR-002 identifica el riesgo de bloqueo entre las escrituras de FastAPI y las lecturas del MCP sobre el mismo archivo SQLite. La configuración del modo WAL es **PENDIENTE** de verificación por el equipo (ver "Decisiones no tomadas").
 
 ## Correctness Properties
 
@@ -442,3 +567,17 @@ Las propiedades que involucran consultas al MCP o llamadas a Gemini usan mocks p
 | `Módulo Reportes` | PBT (Propiedades 14, 15, 16) + integración con mock MCP |
 | `GeminiGateway` | Integración con mock (error, timeout, éxito) |
 | `Módulo Asistente IA` | PBT (Propiedad 17) + integración con mock Gemini |
+
+
+
+
+
+---
+
+## Historial de cambios
+
+| Fecha | Hallazgo que lo origina | Cambio realizado |
+|---|---|---|
+| 2026-09-25 | Auditoría Fase 1 — Verificación 2: C4 Nivel 1 (contexto del sistema) ausente | Añadido diagrama C4 N1 Mermaid en sección Architecture, antes del C4 N2 |
+| 2026-09-25 | Auditoría Fase 1 — Verificación 2: Data Models vacío (solo texto placeholder) | Reemplazado con esquema de 6 tablas SQLite (columnas, tipos, restricciones, notas); valores PENDIENTE marcados explícitamente |
+| 2026-09-25 | Auditoría Fase 1 — Verificación 2: interfaces sin verbos HTTP ni códigos de respuesta | Añadida tabla de Contratos de la API REST con verbo, ruta, parámetros, código de éxito, códigos de error y requisitos para los 9 endpoints |
